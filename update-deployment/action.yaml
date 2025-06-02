@@ -1,0 +1,63 @@
+name: 'Update K8s Deployment YAML'
+description: 'Updates image tag in K8s deployment YAML and commits changes.'
+
+inputs:
+  repository:
+    description: 'The full image repository and name (e.g., europe-north1-docker.pkg.dev/imgbuild-220606/core/app-name) as it should appear in the YAML.'
+    required: true
+  tag:
+    description: 'The new image tag to set (e.g., v1.2.3 or v456).'
+    required: true
+  file_path:
+    description: 'Path (can include wildcards) to Kubernetes deployment YAML file(s) to update.'
+    required: true
+  branch:
+    description: 'The branch to checkout and push changes to.'
+    required: true
+    default: 'master'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout repository code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.branch }}
+
+    - name: Update Image Tag in deployment YAML
+      shell: bash
+      run: |
+        for ACTUAL_FILE_PATH in ${{ inputs.file_path }}; do
+          if [ ! -f "$ACTUAL_FILE_PATH" ]; then
+            echo "Warning: File '$ACTUAL_FILE_PATH' (from pattern '${{ inputs.file_path }}') not found or pattern matched nothing. Skipping."
+            continue
+          fi
+
+          sed -i "s|\(${{ inputs.repository }}\).*|\1:${{ inputs.tag }}|" "$ACTUAL_FILE_PATH"
+
+          if ! grep -q "image: ${{ inputs.repository }}:${{ inputs.tag }}" "$ACTUAL_FILE_PATH"; then
+            echo "Error: sed command did not update the image tag as expected in $ACTUAL_FILE_PATH."
+            echo "Searched for line: image: ${{ inputs.repository }}:${{ inputs.tag }}"
+            echo "--- File content after sed attempt for $ACTUAL_FILE_PATH ---"
+            cat "$ACTUAL_FILE_PATH"
+            echo "------------------------------------"
+            exit 1
+          fi
+        done
+
+    - name: Commit and Push Changes
+      shell: bash
+      run: |
+        git config --global user.name 'github-actions[bot]'
+        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+        git add ${{ inputs.file_path }}
+
+        if git diff --staged --quiet; then
+          echo "No changes to commit in ${{ inputs.file_path }}."
+        else
+          # Use the basename of the image_repository_and_name for a cleaner commit message
+          COMMIT_IMAGE_BASENAME=$(basename "${{ inputs.repository }}")
+          git commit -m "ci: Update ${COMMIT_IMAGE_BASENAME} deployment to use image ${{ inputs.tag }} [skip ci]"
+          git push origin ${{ inputs.branch }}
+          echo "Changes pushed to ${{ inputs.branch }}"
+        fi
