@@ -3,28 +3,28 @@ description: 'Updates image tag in K8s deployment YAML for specified application
 
 inputs:
   image:
-    description: 'The full image path (e.g., host/project/repo/image-name) to update in the manifest files.'
+    description: 'The full image identifier (e.g., host/project/repo/image-name) to find and update in the target files.'
     type: string
     required: true
   tag:
-    description: 'The new image tag to set (e.g., v1.2.3 or v456).'
+    description: 'The new tag or version to apply to the image (e.g., v1.2.3 or v456).'
     type: string
     required: true
   environment:
-    description: 'Target environment (e.g., production, master). Used to determine the deployment file path relative to deploy/argocd/.'
+    description: 'Target environment (e.g., production, staging). This value is used as a directory name in the path to the target files.'
     type: string
     required: true
   applications:
-    description: 'A space-separated list of application names. Each application should have a corresponding deployment.yaml at deploy/argocd/<environment>/<application_name>/deployment.yaml.'
+    description: 'A space-separated list of application names. Each name is used as a directory name in the path to its respective target file.'
     type: string
     required: true
   manifest_basepath:
-    description: 'The base path for the manifest files.'
+    description: 'The base directory path for the target files.'
     type: string
     required: false
     default: 'deploy/argocd'
   manifest_filename:
-    description: 'The name of the manifest file to update within each application directory.'
+    description: 'The name of the target file to update within each application-specific path (e.g., deployment.yaml).'
     type: string
     required: false
     default: 'deployment.yaml'
