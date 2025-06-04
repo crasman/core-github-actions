@@ -1,18 +1,36 @@
 name: 'Update K8s Deployment YAML'
-description: 'Updates image tag in K8s deployment YAML and commits changes.'
+description: 'Updates image tag in K8s deployment YAML for specified applications and commits changes.'
 
 inputs:
   repository:
-    description: 'The full image repository and name (e.g., europe-north1-docker.pkg.dev/imgbuild-220606/core/app-name) as it should appear in the YAML.'
+    description: 'The base image repository (e.g., europe-north1-docker.pkg.dev/imgbuild-220606/core). The application name from the "applications" input will be appended to this.'
+    type: string
     required: true
   tag:
     description: 'The new image tag to set (e.g., v1.2.3 or v456).'
+    type: string
     required: true
-  file_path:
-    description: 'Path (can include wildcards) to Kubernetes deployment YAML file(s) to update.'
+  environment:
+    description: 'Target environment (e.g., production, master). Used to determine the deployment file path relative to deploy/argocd/.'
+    type: string
     required: true
+  applications:
+    description: 'A space-separated list of application names. Each application should have a corresponding deployment.yaml at deploy/argocd/<environment>/<application_name>/deployment.yaml.'
+    type: string
+    required: true
+  manifest_basepath:
+    description: 'The base path for the manifest files.'
+    type: string
+    required: false
+    default: 'deploy/argocd'
+  manifest_filename:
+    description: 'The name of the manifest file to update within each application directory.'
+    type: string
+    required: false
+    default: 'deployment.yaml'
   branch:
     description: 'The branch to checkout and push changes to.'
+    type: string
     required: true
     default: 'master'
 
@@ -24,24 +42,39 @@ runs:
       with:
         ref: ${{ inputs.branch }}
 
-    - name: Update Image Tag in deployment YAML
+    - name: Update Image Tags in deployment YAMLs
       shell: bash
       run: |
-        for ACTUAL_FILE_PATH in ${{ inputs.file_path }}; do
+        set -e
+        for app_name in ${{ inputs.applications }}; do
+          echo "Processing application: $app_name for environment: ${{ inputs.environment }}"
+          ACTUAL_FILE_PATH="${{ inputs.manifest_basepath }}/${app_name}/${{ inputs.environment }}/${{ inputs.manifest_filename }}"
+
           if [ ! -f "$ACTUAL_FILE_PATH" ]; then
-            echo "Warning: File '$ACTUAL_FILE_PATH' (from pattern '${{ inputs.file_path }}') not found or pattern matched nothing. Skipping."
-            continue
+            echo "Error: Deployment file '$ACTUAL_FILE_PATH' for application '$app_name' in environment '${{ inputs.environment }}' not found."
+            exit 1
           fi
 
-          sed -i "s|\(${{ inputs.repository }}\).*|\1:${{ inputs.tag }}|" "$ACTUAL_FILE_PATH"
+          IMAGE_TO_UPDATE="${{ inputs.repository }}/${app_name}"
 
-          if ! grep -q "image: ${{ inputs.repository }}:${{ inputs.tag }}" "$ACTUAL_FILE_PATH"; then
-            echo "Error: sed command did not update the image tag as expected in $ACTUAL_FILE_PATH."
-            echo "Searched for line: image: ${{ inputs.repository }}:${{ inputs.tag }}"
-            echo "--- File content after sed attempt for $ACTUAL_FILE_PATH ---"
-            cat "$ACTUAL_FILE_PATH"
-            echo "------------------------------------"
-            exit 1
+          # Check if the image line exists before attempting to replace
+          if grep -q "^image: ${IMAGE_TO_UPDATE}:.*" "$ACTUAL_FILE_PATH"; then
+
+            sed -i "s|^image: ${IMAGE_TO_UPDATE}:.*|image: ${IMAGE_TO_UPDATE}:${{ inputs.tag }}|" "$ACTUAL_FILE_PATH"
+
+            if ! grep -q "image: ${IMAGE_TO_UPDATE}:${{ inputs.tag }}" "$ACTUAL_FILE_PATH"; then
+              echo "Error: sed command did not update the image tag as expected in $ACTUAL_FILE_PATH for application $app_name."
+              echo "Searched for line: image: ${IMAGE_TO_UPDATE}:${{ inputs.tag }}"
+              echo "--- File content after sed attempt for $ACTUAL_FILE_PATH ---"
+              cat "$ACTUAL_FILE_PATH"
+              echo "------------------------------------"
+              exit 1
+            fi
+
+            echo "Successfully updated image tag in $ACTUAL_FILE_PATH for application $app_name"
+            git add "$ACTUAL_FILE_PATH"
+          else
+            echo "Warning: Image line for '${IMAGE_TO_UPDATE}' not found in '$ACTUAL_FILE_PATH'. Skipping update for this application's image."
           fi
         done
 
@@ -50,14 +83,11 @@ runs:
       run: |
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-        git add ${{ inputs.file_path }}
 
         if git diff --staged --quiet; then
-          echo "No changes to commit in ${{ inputs.file_path }}."
+          echo "No changes to commit for applications '${{ inputs.applications }}' in environment '${{ inputs.environment }}'."
         else
-          # Use the basename of the image_repository_and_name for a cleaner commit message
-          COMMIT_IMAGE_BASENAME=$(basename "${{ inputs.repository }}")
-          git commit -m "ci: Update ${COMMIT_IMAGE_BASENAME} deployment to use image ${{ inputs.tag }} [skip ci]"
+          git commit -m "ci: Update ${{ inputs.applications }} in ${{ inputs.environment }} to tag ${{ inputs.tag }} [skip ci]"
           git push origin ${{ inputs.branch }}
-          echo "Changes pushed to ${{ inputs.branch }}"
+          echo "Changes for applications '${{ inputs.applications }}' in environment '${{ inputs.environment }}' pushed to ${{ inputs.branch }}"
         fi
