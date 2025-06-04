@@ -3,7 +3,7 @@ description: 'Updates image tag in K8s deployment YAML for specified application
 
 inputs:
   image:
-    description: 'The full image path to use for all applications (e.g., europe-north1-docker.pkg.dev/imgbuild-220606/core/my-app-image).'
+    description: 'The full image path (e.g., host/project/repo/image-name) to update in the manifest files.'
     type: string
     required: true
   tag:
