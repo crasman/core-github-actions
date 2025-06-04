@@ -2,8 +2,8 @@ name: 'Update K8s Deployment YAML'
 description: 'Updates image tag in K8s deployment YAML for specified applications and commits changes.'
 
 inputs:
-  repository:
-    description: 'The base image repository (e.g., europe-north1-docker.pkg.dev/imgbuild-220606/core). The application name from the "applications" input will be appended to this.'
+  image:
+    description: 'The full image path to use for all applications (e.g., europe-north1-docker.pkg.dev/imgbuild-220606/core/my-app-image).'
     type: string
     required: true
   tag:
@@ -37,16 +37,19 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # Step 1:
     - name: Checkout repository code
       uses: actions/checkout@v4
       with:
         ref: ${{ inputs.branch }}
 
+    # Step 2:
     - name: Update Image Tags in deployment YAMLs
       shell: bash
       run: |
         set -e
         for app_name in ${{ inputs.applications }}; do
+
           echo "Processing application: $app_name for environment: ${{ inputs.environment }}"
           ACTUAL_FILE_PATH="${{ inputs.manifest_basepath }}/${app_name}/${{ inputs.environment }}/${{ inputs.manifest_filename }}"
 
@@ -55,16 +58,13 @@ runs:
             exit 1
           fi
 
-          IMAGE_TO_UPDATE="${{ inputs.repository }}/${app_name}"
+          if grep -q "${{ inputs.image }}.*" "$ACTUAL_FILE_PATH"; then
 
-          # Check if the image line exists before attempting to replace
-          if grep -q "^image: ${IMAGE_TO_UPDATE}:.*" "$ACTUAL_FILE_PATH"; then
+            sed -i "s|\(${{ inputs.image }}\).*|\1:${{ inputs.tag }}|" "$ACTUAL_FILE_PATH"
 
-            sed -i "s|^image: ${IMAGE_TO_UPDATE}:.*|image: ${IMAGE_TO_UPDATE}:${{ inputs.tag }}|" "$ACTUAL_FILE_PATH"
-
-            if ! grep -q "image: ${IMAGE_TO_UPDATE}:${{ inputs.tag }}" "$ACTUAL_FILE_PATH"; then
+            if ! grep -q "${{ inputs.image }}:${{ inputs.tag }}" "$ACTUAL_FILE_PATH"; then
               echo "Error: sed command did not update the image tag as expected in $ACTUAL_FILE_PATH for application $app_name."
-              echo "Searched for line: image: ${IMAGE_TO_UPDATE}:${{ inputs.tag }}"
+              echo "Searched for line: image: ${{ inputs.image }}:${{ inputs.tag }}"
               echo "--- File content after sed attempt for $ACTUAL_FILE_PATH ---"
               cat "$ACTUAL_FILE_PATH"
               echo "------------------------------------"
@@ -74,10 +74,11 @@ runs:
             echo "Successfully updated image tag in $ACTUAL_FILE_PATH for application $app_name"
             git add "$ACTUAL_FILE_PATH"
           else
-            echo "Warning: Image line for '${IMAGE_TO_UPDATE}' not found in '$ACTUAL_FILE_PATH'. Skipping update for this application's image."
+            echo "Warning: Image line for '${{ inputs.image }}' not found in '$ACTUAL_FILE_PATH'. Skipping update for this application's image."
           fi
         done
 
+    # Step 3:
     - name: Commit and Push Changes
       shell: bash
       run: |
